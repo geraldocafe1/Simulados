@@ -7,6 +7,7 @@
 
   const EXAM_META = {
     simulado2: { label: 'AI-901 Simulado 2', total: 30, collection: 'leaderboard_ai901_simulado2' },
+    simulado3: { label: 'AI-901 Quiz Geral (Mód. 01-06)', total: 40, collection: 'leaderboard_ai901_simulado3' },
     az900_1: { label: 'AZ-900 Simulado 1', total: 73, collection: 'leaderboard_az900_simulado1' },
     az900_2: { label: 'AZ-900 Simulado 2', total: 65, collection: 'leaderboard_az900_simulado2' },
     dp900_1: { label: 'DP-900 Simulado 1', total: 32, collection: 'leaderboard_dp900_simulado1' },

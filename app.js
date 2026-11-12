@@ -37,6 +37,21 @@ document.addEventListener('DOMContentLoaded', () => {
       modalLeaderboardTitle: 'Ranking da Turma - AI-901 (Simulado 2 - 30Q)',
       questions: typeof SIMULADO_2_QUESTIONS !== 'undefined' ? SIMULADO_2_QUESTIONS : []
     },
+    simulado3: {
+      id: 'simulado3',
+      courseId: 'ai-901',
+      courseCode: 'AI-901',
+      shortName: 'Quiz Geral Mód. 01-06 (40Q)',
+      title: 'Simulado 3: Quiz Geral Completo — Módulos 01 a 06 (40Q)',
+      badge: 'QUIZ MÓD. 01-06 (40Q)',
+      subtitle: 'Exame AI-901: Simulado Geral Completo — Módulos 01 a 06 (40 Questões Inéditas de Alta Complexidade)',
+      description: 'Quiz Geral Completo dos Módulos 01 a 06 com 40 questões inéditas de alta complexidade, gabarito oficial e justificativas técnicas cobrindo Introdução à IA no Azure, IA Generativa e Agentes no Foundry, Linguagem, Fala (Speech), Visão Computacional e Content Understanding.',
+      suggestedTime: '40 min',
+      reportSubtitle: 'Simulado Geral Completo (Módulos 01 a 06) for Exam AI-901: Microsoft Azure AI Fundamentals (40 Questões)',
+      leaderboardTitle: 'Ranking Geral da Turma - AI-901 Quiz Geral Módulos 01 a 06 (40Q)',
+      modalLeaderboardTitle: 'Ranking da Turma - AI-901 (Quiz Geral Mód. 01-06 - 40Q)',
+      questions: typeof SIMULADO_3_QUESTIONS !== 'undefined' ? SIMULADO_3_QUESTIONS : []
+    },
     az900_1: {
       id: 'az900_1',
       courseId: 'az-900',
@@ -214,7 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
       accent: '#0078d4',
       status: 'available',
       description: 'Fundamentos de Inteligência Artificial, IA Generativa, Agentes de IA, Visão Computacional, Fala e Microsoft Foundry.',
-      exams: ['simulado1', 'simulado2']
+      exams: ['simulado1', 'simulado2', 'simulado3']
     },
     {
       id: 'az-900',
@@ -279,6 +294,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (simParam === '1' || simParam === 'simulado1') {
       return { view: 'lobby', examId: 'simulado1' };
+    }
+    if (simParam === '3' || simParam === 'simulado3' || simParam === 'quiz') {
+      return { view: 'lobby', examId: 'simulado3' };
     }
     if (simParam === 'az900' || simParam === 'az-900' || simParam === 'az900_1') {
       return { view: 'lobby', examId: 'az900_1' };
@@ -1704,7 +1722,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       let flagBadge = flagged ? `🚩 Sim` : `-`;
       const lines = q.question.split('\n').filter(l => l.trim() && !l.includes('PONTO DE INTERESSE') && !l.includes('ARRASTAR E SOLTAR'));
-      const firstLine = lines[0] || q.question.split('\n')[0];
+      let firstLine = (lines[0] || q.question.split('\n')[0]).replace(/\*\*/g, '');
+      if (firstLine.startsWith('[') && lines[1]) {
+        firstLine = `${firstLine} — ${lines[1].replace(/\*\*/g, '')}`;
+      }
       const snippet = firstLine.substring(0, 95) + (firstLine.length > 95 ? '...' : '');
 
       tbodyHtml += `
@@ -1788,7 +1809,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const sectionBarsContainer = document.getElementById('sectionBarsContainer');
     if (sectionBarsContainer) {
-      const barColors = ['var(--ms-blue-primary)', '#2b88d8', '#005a9e', '#7b1fa2'];
+      const barColors = ['var(--ms-blue-primary)', '#2b88d8', '#005a9e', '#7b1fa2', '#008272', '#d83b01'];
       let idx = 0;
       let barsHtml = '';
       for (const [catName, st] of categoryStats.entries()) {
@@ -1837,7 +1858,10 @@ document.addEventListener('DOMContentLoaded', () => {
     filteredQuestions.forEach(q => {
       const correct = isQuestionCorrect(q);
       const lines = q.question.split('\n').filter(l => l.trim() && !l.includes('PONTO DE INTERESSE') && !l.includes('ARRASTAR E SOLTAR'));
-      const summaryLine = lines[0] || q.question.split('\n')[0];
+      let summaryLine = (lines[0] || q.question.split('\n')[0]).replace(/\*\*/g, '');
+      if (summaryLine.startsWith('[') && lines[1]) {
+        summaryLine = `${summaryLine} — ${lines[1].replace(/\*\*/g, '')}`;
+      }
 
       listHtml += `
         <div style="border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1.25rem; margin-bottom: 1.25rem; background: var(--bg-surface);">

@@ -17,6 +17,7 @@ Este repositório foi projetado como uma **Single Page Application (SPA)** está
    - 👉 **Central de Cursos e Simulados (Página Inicial):** **`https://geraldocafe1.github.io/Simulados/`**
    - 👉 **AI-901 Simulado 1 (50 Questões Oficiais Microsoft):** **`https://geraldocafe1.github.io/Simulados/?simulado=1`**
    - 👉 **AI-901 Simulado 2 (30 Questões ExamTopics):** **`https://geraldocafe1.github.io/Simulados/simulado2/`**
+   - 👉 **AI-901 Simulado 3 — Quiz Geral Módulos 01 a 06 (40 Questões):** **`https://geraldocafe1.github.io/Simulados/?simulado=simulado3`**
 
 Compartilhe esses links com sua turma para que realizem qualquer um dos simulados em computador, tablet ou celular sem necessidade de instalação!
 
