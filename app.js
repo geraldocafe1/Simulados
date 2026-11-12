@@ -328,7 +328,10 @@ document.addEventListener('DOMContentLoaded', () => {
       solutionRevealed: {},
       timerSeconds: 0,
       attemptCount: 1,
-      failedInPreviousAttempt: new Set()
+      failedInPreviousAttempt: new Set(),
+      startedInExamMode: false,
+      usedStudyMode: false,
+      finalizedReport: null
     };
     try {
       const prefix = examKey === 'simulado1' ? 'ai901' : (examKey === 'simulado2' ? 'ai901_sim2' : examKey);
@@ -917,6 +920,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnStudy = document.getElementById('btnStartStudyMode');
     if (btnStudy) {
       btnStudy.addEventListener('click', () => {
+        examStates[currentExamId].usedStudyMode = true;
+        examStates[currentExamId].startedInExamMode = false;
+        examStates[currentExamId].finalizedReport = null;
         setAppMode('study');
         switchView('question');
       });
@@ -925,11 +931,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnExam = document.getElementById('btnStartExamMode');
     if (btnExam) {
       btnExam.addEventListener('click', () => {
-        if (answeredSoFar === 0) {
+        const st = examStates[currentExamId];
+        if (answeredSoFar === 0 || st.usedStudyMode || !st.startedInExamMode || st.finalizedReport) {
+          for (const key of Object.keys(userAnswers)) delete userAnswers[key];
+          flaggedQuestions.clear();
+          for (const key of Object.keys(solutionRevealed)) delete solutionRevealed[key];
           timerSeconds = 0;
-          examStates[currentExamId].timerSeconds = 0;
+          currentQuestionIndex = 0;
+          st.timerSeconds = 0;
+          st.currentQuestionIndex = 0;
           updateTimerDisplay();
         }
+        st.startedInExamMode = true;
+        st.usedStudyMode = false;
+        st.finalizedReport = null;
         setAppMode('exam');
         switchView('question');
       });
@@ -1008,7 +1023,35 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   modeToggleBtn.addEventListener('click', () => {
-    setAppMode(appMode === 'study' ? 'exam' : 'study');
+    const st = examStates[currentExamId];
+    if (appMode === 'exam') {
+      const confirmStudy = window.confirm(
+        'Deseja alternar para o Modo Estudo?\n\n⚠️ Atenção: No Modo Estudo o cronômetro é pausado e o gabarito é liberado. Por isso, esta tentativa NÃO poderá ser publicada no Ranking Oficial da Turma.'
+      );
+      if (!confirmStudy) return;
+      st.usedStudyMode = true;
+      setAppMode('study');
+    } else {
+      const hasAnyProgress = activeQuestions.some(q => isQuestionAnswered(q)) || Object.keys(solutionRevealed).length > 0 || timerSeconds > 0;
+      if (hasAnyProgress || st.usedStudyMode) {
+        const confirmResetForExam = window.confirm(
+          'Para valer no Ranking Oficial da Turma, o Modo Simulado (Exame) deve ser realizado do início ao fim com cronômetro ativo e sem consulta prévia ao gabarito.\n\nDeseja zerar as respostas atuais e iniciar uma tentativa oficial no Modo Simulado (Exame) a partir da Questão 1?'
+        );
+        if (!confirmResetForExam) return;
+        for (const key of Object.keys(userAnswers)) delete userAnswers[key];
+        flaggedQuestions.clear();
+        for (const key of Object.keys(solutionRevealed)) delete solutionRevealed[key];
+        timerSeconds = 0;
+        currentQuestionIndex = 0;
+        st.timerSeconds = 0;
+        st.currentQuestionIndex = 0;
+        updateTimerDisplay();
+      }
+      st.startedInExamMode = true;
+      st.usedStudyMode = false;
+      st.finalizedReport = null;
+      setAppMode('exam');
+    }
     if (currentView === 'question') {
       renderCurrentQuestion();
     }
@@ -1164,6 +1207,11 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
 
         <div class="action-group-right">
+          ${examStates[currentExamId].finalizedReport ? `
+            <button id="btnBackToScoreReport" class="btn-ms btn-ms-secondary" title="Voltar ao Relatório Final e Ranking">
+              <span>📊</span> Voltar ao Resultado
+            </button>
+          ` : ''}
           <button id="btnPrevQuestion" class="btn-ms btn-ms-secondary" ${currentQuestionIndex === 0 ? 'disabled' : ''}>
             <span>‹</span> Anterior
           </button>
@@ -1647,8 +1695,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnToggleSol = document.getElementById('btnToggleSolution');
     if (btnToggleSol) {
       btnToggleSol.addEventListener('click', () => {
+        examStates[currentExamId].usedStudyMode = true;
         solutionRevealed[q.id] = !solutionRevealed[q.id];
         renderCurrentQuestion();
+      });
+    }
+
+    const btnBackReport = document.getElementById('btnBackToScoreReport');
+    if (btnBackReport) {
+      btnBackReport.addEventListener('click', () => {
+        switchView('score');
       });
     }
 
@@ -1764,6 +1820,21 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   btnFinishExamFromReview.addEventListener('click', () => {
+    const unansweredCount = activeQuestions.filter(q => !isQuestionAnswered(q)).length;
+    const modalTextEl = finishModal ? finishModal.querySelector('.modal-text') : null;
+    if (modalTextEl) {
+      if (appMode === 'exam' && unansweredCount > 0) {
+        modalTextEl.innerHTML = `
+          Ao selecionar <strong>Sim</strong>, você encerrará esta seção do exame e não poderá mais alterar suas respostas.<br><br>
+          <span style="color: #d83b01; font-weight: 700;">⚠️ Atenção: Você ainda possui ${unansweredCount} ${unansweredCount === 1 ? 'questão não respondida' : 'questões não respondidas'}!</span>
+          Para que sua nota seja aceita no <strong>Ranking Oficial da Turma</strong>, é necessário responder todas as ${totalQuestions} questões até o final no Modo Simulado (Exame).
+        `;
+      } else {
+        modalTextEl.innerHTML = `
+          Ao selecionar <strong>Sim</strong>, você encerrará esta seção do exame e não poderá mais alterar suas respostas. Seu relatório oficial de pontuação e o gabarito comentado serão gerados imediatamente.
+        `;
+      }
+    }
     finishModal.classList.add('active');
   });
 
@@ -1774,6 +1845,40 @@ document.addEventListener('DOMContentLoaded', () => {
   btnConfirmFinish.addEventListener('click', () => {
     finishModal.classList.remove('active');
     stopTimer();
+
+    const st = examStates[currentExamId];
+    let correctCount = 0;
+    let answeredCount = 0;
+    activeQuestions.forEach(q => {
+      if (isQuestionAnswered(q)) answeredCount++;
+      if (isQuestionCorrect(q)) correctCount++;
+    });
+
+    const hadAnySolutionRevealed = Object.keys(solutionRevealed).some(k => solutionRevealed[k]);
+    const allAnswered = answeredCount === totalQuestions;
+    const isPureExamMode = (
+      appMode === 'exam' &&
+      st.startedInExamMode === true &&
+      !st.usedStudyMode &&
+      !hadAnySolutionRevealed
+    );
+    const isEligible = isPureExamMode && allAnswered;
+
+    let reason = '';
+    if (!isPureExamMode) {
+      reason = 'Esta tentativa utilizou o Modo Estudo (sem cronômetro ou com consulta ao gabarito). Somente quem realiza o simulado no Modo Simulado (Exame) do início ao fim entra no Ranking Oficial.';
+    } else if (!allAnswered) {
+      reason = `Você finalizou a prova respondendo ${answeredCount} de ${totalQuestions} questões. Somente quem responde todas as questões até o final no Modo Simulado (Exame) entra no Ranking Oficial.`;
+    }
+
+    st.finalizedReport = {
+      score: correctCount,
+      total: totalQuestions,
+      timeSeconds: Math.max(1, timerSeconds),
+      eligibleForRanking: isEligible,
+      ineligibleReason: reason
+    };
+
     switchView('score');
   });
 
@@ -1894,7 +1999,24 @@ document.addEventListener('DOMContentLoaded', () => {
     scoreReportQuestionsList.innerHTML = listHtml;
 
     if (window.Leaderboard && typeof window.Leaderboard.onScoreReportView === 'function') {
-      window.Leaderboard.onScoreReportView(correctCount, totalQuestions, timerSeconds);
+      const fin = examStates[currentExamId].finalizedReport;
+      if (fin) {
+        window.Leaderboard.onScoreReportView(
+          fin.score,
+          fin.total,
+          fin.timeSeconds,
+          fin.eligibleForRanking,
+          fin.ineligibleReason
+        );
+      } else {
+        window.Leaderboard.onScoreReportView(
+          correctCount,
+          totalQuestions,
+          timerSeconds,
+          false,
+          'Somente tentativas concluídas integralmente no Modo Simulado (Exame) podem ser publicadas no Ranking.'
+        );
+      }
     }
   }
 
@@ -1999,6 +2121,9 @@ document.addEventListener('DOMContentLoaded', () => {
     for (const key of Object.keys(solutionRevealed)) delete solutionRevealed[key];
     timerSeconds = 0;
     examStates[currentExamId].timerSeconds = 0;
+    examStates[currentExamId].startedInExamMode = false;
+    examStates[currentExamId].usedStudyMode = false;
+    examStates[currentExamId].finalizedReport = null;
     updateTimerDisplay();
     currentQuestionIndex = 0;
     examStates[currentExamId].currentQuestionIndex = 0;

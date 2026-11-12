@@ -1,11 +1,14 @@
 // ============================================================================
-// SIMULADO OFICIAL MICROSOFT AI-901 - LEADERBOARD (RANKING DA TURMA)
+// PORTAL DE SIMULADOS OFICIAL - LEADERBOARD (RANKING DA TURMA)
+// Regra Oficial: Somente tentativas realizadas integralmente no Modo Simulado
+// (Exame) com cronômetro ativo e todas as questões respondidas entram no Ranking.
 // ============================================================================
 
 (function () {
   let activeExamId = 'simulado1';
 
   const EXAM_META = {
+    simulado1: { label: 'AI-901 Simulado 1', total: 50, collection: 'leaderboard_ai901' },
     simulado2: { label: 'AI-901 Simulado 2', total: 30, collection: 'leaderboard_ai901_simulado2' },
     simulado3: { label: 'AI-901 Quiz Geral (Mód. 01-06)', total: 40, collection: 'leaderboard_ai901_simulado3' },
     az900_1: { label: 'AZ-900 Simulado 1', total: 73, collection: 'leaderboard_az900_simulado1' },
@@ -22,38 +25,12 @@
   };
 
   function getStorageKeys(examId) {
-    if (EXAM_META[examId]) {
+    if (examId !== 'simulado1' && EXAM_META[examId]) {
       const m = EXAM_META[examId];
-      const nearScore = Math.max(1, m.total - 1);
-      const nearPct = Math.round((nearScore / m.total) * 100);
       return {
         localStorageKey: `ms_${examId}_leaderboard_cache`,
         submittedKey: `ms_${examId}_last_submission_id`,
-        collectionName: m.collection,
-        seedData: [
-          {
-            id: `seed_${examId}_1`,
-            name: `Gabarito Oficial ${m.label} (Referência)`,
-            score: m.total,
-            total: m.total,
-            percentage: 100,
-            timeSeconds: 780,
-            timeFormatted: '13m 00s',
-            date: '2026-10-30T10:00:00.000Z',
-            isSeed: true
-          },
-          {
-            id: `seed_${examId}_2`,
-            name: 'Instrutor Café (Cloud & AI Certified)',
-            score: nearScore,
-            total: m.total,
-            percentage: nearPct,
-            timeSeconds: 915,
-            timeFormatted: '15m 15s',
-            date: '2026-10-30T10:15:00.000Z',
-            isSeed: true
-          }
-        ]
+        collectionName: m.collection
       };
     }
 
@@ -64,46 +41,47 @@
     return {
       localStorageKey: 'ms_ai901_leaderboard_cache',
       submittedKey: 'ms_ai901_last_submission_id',
-      collectionName: baseCollection,
-      seedData: [
-        {
-          id: 'seed_1',
-          name: 'Gabarito Oficial (Referência)',
-          score: 50,
-          total: 50,
-          percentage: 100,
-          timeSeconds: 780,
-          timeFormatted: '13m 00s',
-          date: '2026-10-24T10:00:00.000Z',
-          isSeed: true
-        },
-        {
-          id: 'seed_2',
-          name: 'Instrutor Café (Microsoft Certified)',
-          score: 49,
-          total: 50,
-          percentage: 98,
-          timeSeconds: 915,
-          timeFormatted: '15m 15s',
-          date: '2026-10-24T10:15:00.000Z',
-          isSeed: true
-        }
-      ]
+      collectionName: baseCollection
     };
   }
 
   // State
   let leaderboardEntries = [];
-  let currentScoreData = null; // { score, total, percentage, timeSeconds, timeFormatted }
+  let currentScoreData = null; // { examId, score, total, percentage, timeSeconds, timeFormatted, eligibleForRanking, ineligibleReason, hasSubmitted, submittedRank, submittedName }
   let lastSubmittedId = null;
   let isOnline = false;
 
   // Helper: Format seconds to "Xm Ys"
   function formatSeconds(totalSeconds) {
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
+    const safeSecs = Math.max(1, Math.floor(Number(totalSeconds) || 0));
+    const mins = Math.floor(safeSecs / 60);
+    const secs = safeSecs % 60;
     if (mins === 0) return `${secs}s`;
     return `${mins}m ${String(secs).padStart(2, '0')}s`;
+  }
+
+  // Filter out invalid/fictitious seed entries or zero-time study entries
+  function sanitizeEntries(entries) {
+    if (!Array.isArray(entries)) return [];
+    const seenIds = new Set();
+    return entries.filter(entry => {
+      if (!entry || typeof entry !== 'object') return false;
+      if (entry.isSeed === true || String(entry.id || '').startsWith('seed_')) return false;
+      if (!entry.name || typeof entry.name !== 'string') return false;
+      const tSecs = Number(entry.timeSeconds);
+      if (!Number.isFinite(tSecs) || tSecs <= 0) return false;
+      const key = entry.id || `${entry.name}_${entry.date}_${entry.score}`;
+      if (seenIds.has(key)) return false;
+      seenIds.add(key);
+      return true;
+    }).map(entry => ({
+      ...entry,
+      score: Number(entry.score) || 0,
+      total: Number(entry.total) || 1,
+      percentage: Number(entry.percentage) || 0,
+      timeSeconds: Math.max(1, Number(entry.timeSeconds) || 1),
+      timeFormatted: entry.timeFormatted || formatSeconds(entry.timeSeconds)
+    }));
   }
 
   // Sort Leaderboard:
@@ -118,7 +96,7 @@
       if (a.timeSeconds !== b.timeSeconds) {
         return a.timeSeconds - b.timeSeconds;
       }
-      return new Date(a.date) - new Date(b.date);
+      return new Date(a.date || 0) - new Date(b.date || 0);
     });
   }
 
@@ -141,24 +119,23 @@
     } catch (e) {}
 
     updateSyncStatus('Sincronizando...');
-    let fetched = null;
+    let remoteEntries = null;
 
     if (typeof FIREBASE_CONFIG !== 'undefined' && FIREBASE_CONFIG.databaseURL) {
       try {
         const url = `${FIREBASE_CONFIG.databaseURL.replace(/\/$/, '')}/${cfg.collectionName}.json`;
-        const res = await fetch(url, { method: 'GET' });
+        const res = await fetch(url, { method: 'GET', cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
           if (data && typeof data === 'object') {
-            fetched = Object.keys(data).map(key => ({
+            remoteEntries = Object.keys(data).map(key => ({
               ...data[key],
               remoteKey: key
             }));
-            isOnline = true;
           } else {
-            fetched = [];
-            isOnline = true;
+            remoteEntries = [];
           }
+          isOnline = true;
         }
       } catch (err) {
         console.warn('[Leaderboard] Falha ao conectar ao Firebase (usando armazenamento local):', err.message);
@@ -166,29 +143,43 @@
       }
     }
 
-    if (!fetched || fetched.length === 0) {
-      try {
-        const local = JSON.parse(localStorage.getItem(cfg.localStorageKey) || '[]');
-        fetched = local.length > 0 ? local : cfg.seedData;
-      } catch (e) {
-        fetched = cfg.seedData;
-      }
+    let localEntries = [];
+    try {
+      localEntries = sanitizeEntries(JSON.parse(localStorage.getItem(cfg.localStorageKey) || '[]'));
+    } catch (e) {
+      localEntries = [];
     }
 
-    leaderboardEntries = sortEntries(fetched);
+    let combined = [];
+    if (remoteEntries !== null) {
+      combined = sanitizeEntries(remoteEntries);
+    } else {
+      combined = localEntries;
+    }
+
+    leaderboardEntries = sortEntries(combined);
     try {
       localStorage.setItem(cfg.localStorageKey, JSON.stringify(leaderboardEntries));
     } catch (e) {}
 
-    updateSyncStatus(isOnline ? '🟢 Conectado ao Firebase' : '💾 Modo Local / Offline');
+    updateSyncStatus(isOnline ? '🟢 Conectado em tempo real (Firebase)' : '💾 Modo Local / Offline');
     renderAllLeaderboardViews();
     return leaderboardEntries;
   }
 
-  // Save new score
+  // Save new score (ONLY allowed for valid Exam Mode completions)
   async function submitScore(studentName) {
     if (!currentScoreData) {
       alert('Nenhum resultado final de prova encontrado para registrar.');
+      return false;
+    }
+
+    if (!currentScoreData.eligibleForRanking) {
+      alert(currentScoreData.ineligibleReason || 'Somente tentativas concluídas integralmente no Modo Simulado (Exame) podem ser registradas no Ranking.');
+      return false;
+    }
+
+    if (currentScoreData.hasSubmitted) {
       return false;
     }
 
@@ -199,15 +190,18 @@
     }
 
     const cfg = getStorageKeys(activeExamId);
+    const safeTimeSeconds = Math.max(1, Number(currentScoreData.timeSeconds) || 1);
     const newId = 'entry_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     const newEntry = {
       id: newId,
+      examId: activeExamId,
+      mode: 'exam',
       name: trimmedName,
       score: currentScoreData.score,
       total: currentScoreData.total,
       percentage: currentScoreData.percentage,
-      timeSeconds: currentScoreData.timeSeconds,
-      timeFormatted: currentScoreData.timeFormatted,
+      timeSeconds: safeTimeSeconds,
+      timeFormatted: formatSeconds(safeTimeSeconds),
       date: new Date().toISOString()
     };
 
@@ -231,23 +225,36 @@
       }
     }
 
-    leaderboardEntries.push(newEntry);
-    leaderboardEntries = sortEntries(leaderboardEntries);
-    try {
-      localStorage.setItem(cfg.localStorageKey, JSON.stringify(leaderboardEntries));
-    } catch (e) {}
-
     lastSubmittedId = newId;
     try {
       localStorage.setItem(cfg.submittedKey, newId);
     } catch (e) {}
 
-    updateSyncStatus(postedToFirebase ? '🟢 Pontuação publicada no Firebase!' : '💾 Pontuação salva localmente!');
+    // If posted to Firebase, fetch latest entries so all classmates are synced
+    if (postedToFirebase) {
+      await fetchLeaderboard();
+      if (!leaderboardEntries.some(e => e.id === newId)) {
+        leaderboardEntries.push(newEntry);
+        leaderboardEntries = sortEntries(leaderboardEntries);
+      }
+    } else {
+      leaderboardEntries.push(newEntry);
+      leaderboardEntries = sortEntries(sanitizeEntries(leaderboardEntries));
+    }
 
-    const userRank = leaderboardEntries.findIndex(e => e.id === newId) + 1;
+    try {
+      localStorage.setItem(cfg.localStorageKey, JSON.stringify(leaderboardEntries));
+    } catch (e) {}
+
+    updateSyncStatus(postedToFirebase ? '🟢 Pontuação publicada no Ranking Online!' : '💾 Pontuação salva localmente!');
+
+    const userRank = Math.max(1, leaderboardEntries.findIndex(e => e.id === newId) + 1);
+    currentScoreData.hasSubmitted = true;
+    currentScoreData.submittedRank = userRank;
+    currentScoreData.submittedName = trimmedName;
 
     renderAllLeaderboardViews();
-    updateSubmitCardState(userRank, trimmedName);
+    renderSubmissionBoxState();
     return true;
   }
 
@@ -258,7 +265,11 @@
     const top3 = entries[2] || null;
 
     if (!top1) {
-      return `<div style="text-align: center; color: var(--text-muted); padding: 1.5rem;">Nenhum participante registrado ainda. Seja o primeiro!</div>`;
+      return `
+        <div style="text-align: center; color: var(--text-muted); padding: 1.5rem; border: 1px dashed var(--border-color); border-radius: 8px; margin-bottom: 1rem;">
+          🏆 Nenhum aluno registrado neste simulado ainda. Conclua todas as questões no <strong>Modo Simulado (Exame)</strong> para inaugurar o 1º lugar do pódio!
+        </div>
+      `;
     }
 
     return `
@@ -268,8 +279,8 @@
           <div class="podium-medal">🥈 2º</div>
           <div class="podium-avatar">🥈</div>
           <div class="podium-name" title="${top2 ? escapeHtml(top2.name) : '-'}">${top2 ? escapeHtml(top2.name) : '-'}</div>
-          <div class="podium-score">${top2 ? top2.percentage + '%' : '-'}</div>
-          <div class="podium-time">${top2 ? top2.timeFormatted : '-'}</div>
+          <div class="podium-score">${top2 ? `${top2.percentage}% (${top2.score}/${top2.total})` : '-'}</div>
+          <div class="podium-time">${top2 ? `⏱️ ${top2.timeFormatted}` : '-'}</div>
           <div class="podium-pillar pillar-silver">2</div>
         </div>
 
@@ -289,8 +300,8 @@
           <div class="podium-medal">🥉 3º</div>
           <div class="podium-avatar">🥉</div>
           <div class="podium-name" title="${top3 ? escapeHtml(top3.name) : '-'}">${top3 ? escapeHtml(top3.name) : '-'}</div>
-          <div class="podium-score">${top3 ? top3.percentage + '%' : '-'}</div>
-          <div class="podium-time">${top3 ? top3.timeFormatted : '-'}</div>
+          <div class="podium-score">${top3 ? `${top3.percentage}% (${top3.score}/${top3.total})` : '-'}</div>
+          <div class="podium-time">${top3 ? `⏱️ ${top3.timeFormatted}` : '-'}</div>
           <div class="podium-pillar pillar-bronze">3</div>
         </div>
       </div>
@@ -298,9 +309,10 @@
   }
 
   // Render Leaderboard Rows HTML
-  function renderTableRowsHtml(entries, limit = 20) {
+  function renderTableRowsHtml(entries, limit = 20, includeDateColumn = true) {
+    const colSpan = includeDateColumn ? 6 : 5;
     if (!entries || entries.length === 0) {
-      return `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">Nenhum participante ainda. Seja o primeiro a registrar!</td></tr>`;
+      return `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">Nenhum participante registrado ainda neste simulado.</td></tr>`;
     }
 
     const slice = entries.slice(0, limit);
@@ -326,7 +338,7 @@
             <span class="score-pill ${entry.percentage >= 80 ? 'pass' : 'fail'}">${entry.percentage}%</span>
           </td>
           <td style="text-align: center; font-family: monospace;">⏱️ ${escapeHtml(entry.timeFormatted)}</td>
-          <td style="text-align: center; font-size: 0.85rem; color: var(--text-secondary);">${dateFormatted}</td>
+          ${includeDateColumn ? `<td style="text-align: center; font-size: 0.85rem; color: var(--text-secondary);">${dateFormatted}</td>` : ''}
         </tr>
       `;
     }).join('');
@@ -338,13 +350,13 @@
     if (podiumEl) podiumEl.innerHTML = renderPodiumHtml(leaderboardEntries);
 
     const tableBodyEl = document.getElementById('leaderboardTableBody');
-    if (tableBodyEl) tableBodyEl.innerHTML = renderTableRowsHtml(leaderboardEntries, 15);
+    if (tableBodyEl) tableBodyEl.innerHTML = renderTableRowsHtml(leaderboardEntries, 30, true);
 
     const modalPodiumEl = document.getElementById('modalPodiumContainer');
     if (modalPodiumEl) modalPodiumEl.innerHTML = renderPodiumHtml(leaderboardEntries);
 
     const modalTableBodyEl = document.getElementById('modalLeaderboardTableBody');
-    if (modalTableBodyEl) modalTableBodyEl.innerHTML = renderTableRowsHtml(leaderboardEntries, 50);
+    if (modalTableBodyEl) modalTableBodyEl.innerHTML = renderTableRowsHtml(leaderboardEntries, 50, false);
   }
 
   function updateSyncStatus(text) {
@@ -352,46 +364,89 @@
     if (el) el.textContent = text;
   }
 
-  function updateSubmitCardState(rank, name) {
+  function renderSubmissionBoxState() {
     const formBox = document.getElementById('leaderboardSubmitSection');
     const resultBox = document.getElementById('leaderboardUserRankResult');
-    if (formBox && resultBox) {
+    if (!formBox || !resultBox || !currentScoreData) return;
+
+    if (!currentScoreData.eligibleForRanking) {
+      formBox.style.display = 'none';
+      resultBox.style.display = 'block';
+      resultBox.innerHTML = `
+        <div style="background: rgba(255, 185, 0, 0.12); border: 1px solid rgba(255, 185, 0, 0.45); border-left: 4px solid #ffb900; border-radius: 8px; padding: 14px 16px; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 12px;">
+          <span style="font-size: 1.6rem;">🔒</span>
+          <div>
+            <strong style="display: block; margin-bottom: 3px; color: var(--text-primary);">Ranking Exclusivo para o Modo Simulado (Exame)</strong>
+            <div style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.45;">
+              ${escapeHtml(currentScoreData.ineligibleReason || 'Somente quem realiza o simulado até o final no Modo Simulado (Exame) com cronômetro ativo pode publicar no Ranking Oficial da Turma.')}
+              <br>Para disputar o pódio, clique em <strong>Refazer Simulado</strong> abaixo e escolha <strong>"Iniciar Modo Simulado (Ativar Relógio)"</strong>.
+            </div>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    if (currentScoreData.hasSubmitted) {
       formBox.style.display = 'none';
       resultBox.style.display = 'block';
       resultBox.innerHTML = `
         <div class="leaderboard-success-alert">
           <span style="font-size: 1.5rem;">🎉</span>
           <div>
-            <strong>Parabéns, ${escapeHtml(name)}!</strong> Seu resultado foi registrado com sucesso.
-            <div>Você está na <strong>${rank}ª posição</strong> do Ranking Geral da Turma!</div>
+            <strong>Parabéns, ${escapeHtml(currentScoreData.submittedName)}!</strong> Seu resultado no Modo Simulado (Exame) foi registrado com sucesso.
+            <div>Você está na <strong>${currentScoreData.submittedRank}ª posição</strong> do Ranking Oficial da Turma (Nota: <strong>${currentScoreData.percentage}%</strong> em <strong>⏱️ ${escapeHtml(currentScoreData.timeFormatted)}</strong>)!</div>
           </div>
         </div>
       `;
+      return;
     }
+
+    formBox.style.display = 'block';
+    resultBox.style.display = 'none';
   }
 
   // Called from app.js when exam finishes and score report is viewed
-  function onScoreReportView(score, total, timeSeconds) {
+  function onScoreReportView(score, total, timeSeconds, eligibleForRanking = false, ineligibleReason = '') {
+    const safeTimeSeconds = Math.max(1, Number(timeSeconds) || 1);
     const percentage = Math.round((score / total) * 100);
-    currentScoreData = {
-      score,
-      total,
-      percentage,
-      timeSeconds,
-      timeFormatted: formatSeconds(timeSeconds)
-    };
 
-    const formBox = document.getElementById('leaderboardSubmitSection');
-    const resultBox = document.getElementById('leaderboardUserRankResult');
-    if (formBox) formBox.style.display = 'block';
-    if (resultBox) resultBox.style.display = 'none';
+    // Keep submission state if re-rendering the same finalized report (e.g. filtering questions)
+    const isSameAttempt = (
+      currentScoreData &&
+      currentScoreData.examId === activeExamId &&
+      currentScoreData.score === score &&
+      currentScoreData.total === total &&
+      currentScoreData.timeSeconds === safeTimeSeconds &&
+      currentScoreData.hasSubmitted
+    );
 
+    if (!isSameAttempt) {
+      currentScoreData = {
+        examId: activeExamId,
+        score,
+        total,
+        percentage,
+        timeSeconds: safeTimeSeconds,
+        timeFormatted: formatSeconds(safeTimeSeconds),
+        eligibleForRanking: Boolean(eligibleForRanking),
+        ineligibleReason: ineligibleReason || '',
+        hasSubmitted: false,
+        submittedRank: null,
+        submittedName: ''
+      };
+    }
+
+    renderSubmissionBoxState();
     fetchLeaderboard();
   }
 
   function setActiveExam(examId) {
     if (examId === 'simulado1' || EXAM_META[examId]) {
-      activeExamId = examId;
+      if (activeExamId !== examId) {
+        activeExamId = examId;
+        currentScoreData = null;
+      }
       fetchLeaderboard();
     }
   }
